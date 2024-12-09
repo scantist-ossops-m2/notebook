@@ -7,9 +7,9 @@ import re
 import os
 
 try:
-    from urllib.parse import urlparse # Py 3
+    from urllib.parse import urlparse, urlunparse  # Py 3
 except ImportError:
-    from urlparse import urlparse # Py 2
+    from urlparse import urlparse, urlunparse  # Py 2
 import uuid
 
 from tornado.escape import url_escape
@@ -39,15 +39,23 @@ class LoginHandler(IPythonHandler):
         """
         if default is None:
             default = self.base_url
-        if not url.startswith(self.base_url):
+        # protect chrome users from mishandling unescaped backslashes.
+        # \ is not valid in urls, but some browsers treat it as /
+        # instead of %5C, causing `\\` to behave as `//`
+        url = url.replace("\\", "%5C")
+        parsed = urlparse(url)
+        path_only = urlunparse(parsed._replace(netloc='', scheme=''))
+        if url != path_only or not (parsed.path + '/').startswith(self.base_url):
             # require that next_url be absolute path within our path
             allow = False
             # OR pass our cross-origin check
-            if '://' in url:
+            if url != path_only:
                 # if full URL, run our cross-origin check:
-                parsed = urlparse(url.lower())
                 origin = '%s://%s' % (parsed.scheme, parsed.netloc)
-                if self.allow_origin:
+                origin = origin.lower()
+                if origin == '%s://%s' % (self.request.protocol, self.request.host):
+                    allow = True
+                elif self.allow_origin:
                     allow = self.allow_origin == origin
                 elif self.allow_origin_pat:
                     allow = bool(self.allow_origin_pat.match(origin))
